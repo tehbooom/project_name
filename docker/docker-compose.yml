@@ -1,5 +1,5 @@
 services:
-  project_name:
+  api:
     build: .
     environment:
       - DB_USERNAME=postgres
@@ -18,6 +18,8 @@ services:
       - POSTGRES_DB=words
     volumes:
     - "database-data:/var/lib/postgresql/data"
+    ports:
+      - '5432:5432'
     restart: always
 volumes:
   database-data: {}
