@@ -4,13 +4,18 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
+	"regexp"
 
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
 	"github.com/tehbooom/project_name/model"
 )
+
+const nurl = "https://greenopolis.com/list-of-nouns/"
+const aurl = "https://greenopolis.com/adjectives-list/"
 
 type App struct {
 	Router *mux.Router
@@ -27,9 +32,80 @@ func (a *App) Initialize(user, password, dbname string) {
 		log.Printf("Error connecting to db: %v\n", err)
 	}
 
+	a.initializeDB()
+
 	a.Router = mux.NewRouter()
 
 	a.initializeRoutes()
+}
+
+func (a *App) initializeDB() {
+
+	// regex
+	re := regexp.MustCompile(`<li>(.*?)</li>`)
+
+	// create table
+	const nounTable = ` CREATE TABLE [IF NOT EXISTS] nouns (
+		id serial PRIMARY KEY,
+		word text
+	)`
+
+	const adjectiveTable = ` CREATE TABLE [IF NOT EXISTS] adjectives (
+		id serial PRIMARY KEY,
+		word text
+	)`
+
+	a.DB.Exec(nounTable)
+	a.DB.Exec(adjectiveTable)
+
+	// nouns
+
+	const nrow = `INSERT INTO nouns (
+	word
+	)
+	VALUES $1
+	)`
+
+	nresp, err := http.Get(nurl) // get contents of noun webpage
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer nresp.Body.Close()
+
+	nhtml, err := ioutil.ReadAll(nresp.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	nmatches := re.FindAllStringSubmatch(string(nhtml), -1) // select all words from regex and insert into table
+	for _, w := range nmatches {
+		a.DB.Exec(nrow, w[1])
+	}
+	defer a.DB.Close()
+
+	//adjectives
+	const arow = `INSERT INTO adjectives (
+		word
+	)
+	VALUES $1
+	)`
+
+	aresp, err := http.Get(aurl) // get contents of adjectives webpage
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer aresp.Body.Close()
+	ahtml, err := ioutil.ReadAll(aresp.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	amatches := re.FindAllStringSubmatch(string(ahtml), -1) // select all words from regex and insert into table
+	for _, w := range amatches {
+		a.DB.Exec(arow, w[1])
+	}
+	defer a.DB.Close()
 }
 
 func (a *App) Run(addr string) {
