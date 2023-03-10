@@ -1,9 +1,12 @@
 package model
 
 import (
+	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"math/rand"
+	"strings"
 	"time"
 )
 
@@ -12,42 +15,47 @@ type Name struct {
 }
 
 var projectName string
+var err error
 
 func (n *Name) Getwords(DB *sql.DB) ([]Name, error) {
-	var err error
-	var aNum int
-	aRows := DB.QueryRow("SELECT COUNT (DISTINCT word) FROM adjectives WHERE word IS NOT NULL")
-	err = aRows.Scan(&aNum)
-	if err != nil {
-		log.Fatal(err)
-	}
+	words := []string{"noun", "adjective"}
 
-	var nNum int
-	nRows := DB.QueryRow("SELECT COUNT (DISTINCT word) FROM nouns WHERE word IS NOT NULL")
-	err = nRows.Scan(&nNum)
-	if err != nil {
-		log.Fatal(err)
-	}
+	ctx, cancelfunc := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancelfunc()
 
-	min := 2
-	rand.Seed(time.Now().UnixNano())
-
+	var num int
 	var adjective string
-	aRand := rand.Intn(aNum-min+1) + min
-	aWord := DB.QueryRow("SELECT word FROM adjectives where id=$1", aRand)
-	err = aWord.Scan(&adjective)
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	var noun string
-	nRand := rand.Intn(nNum-min+1) + min
-	nWord := DB.QueryRow("SELECT word FROM nouns where id=$1", nRand)
-	err = nWord.Scan(&noun)
-	if err != nil {
-		log.Fatal(err)
-	}
+	min := 2
 
+	for _, word := range words {
+		countRow := fmt.Sprintf("SELECT COUNT (DISTINCT word) FROM %s WHERE word IS NOT NULL", word)
+
+		rows := DB.QueryRowContext(ctx, countRow)
+		err = rows.Scan(&num)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		rand.Seed(time.Now().UnixNano())
+
+		randomInt := rand.Intn(num-min+1) + min
+		if strings.Compare(word, "noun") == 0 {
+			query := fmt.Sprintf("SELECT word FROM %s where id=%d", word, randomInt)
+			returnedWord := DB.QueryRowContext(ctx, query)
+			err = returnedWord.Scan(&noun)
+			if err != nil {
+				log.Fatal(err)
+			}
+		} else {
+			query := fmt.Sprintf("SELECT word FROM %s where id=%d", word, randomInt)
+			returnedWord := DB.QueryRowContext(ctx, query)
+			err = returnedWord.Scan(&adjective)
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
+	}
 	names := []Name{}
 
 	var tempProjectName string = adjective + "-" + noun
@@ -55,7 +63,7 @@ func (n *Name) Getwords(DB *sql.DB) ([]Name, error) {
 	p := &projectName
 
 	if p == &tempProjectName {
-		return names, err //need to restart the stuff
+		return names, err
 	} else {
 		var n Name
 		projectname := tempProjectName
@@ -63,5 +71,4 @@ func (n *Name) Getwords(DB *sql.DB) ([]Name, error) {
 		names = append(names, n)
 		return names, nil
 	}
-
 }

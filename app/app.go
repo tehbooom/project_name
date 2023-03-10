@@ -1,33 +1,38 @@
 package app
 
 import (
+	"bufio"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net/http"
-	"regexp"
+	"os"
+	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
 	"github.com/tehbooom/project_name/model"
 )
 
-const nurl = "https://greenopolis.com/list-of-nouns/"
-const aurl = "https://greenopolis.com/adjectives-list/"
-
 type App struct {
 	Router *mux.Router
 	DB     *sql.DB
 }
 
-func (a *App) Initialize(user, password, dbname string) {
-	dsn := fmt.Sprintf("host=localhost port=5432 sslmode=disable user=%s password=%s dbname=%s", user, password, dbname)
+func (a *App) Initialize(host, port, user, password, dbname string) {
+	dsn := fmt.Sprintf("host=%s port=%s sslmode=disable user=%s password=%s dbname=%s", host, port, user, password, dbname)
 
 	var err error
 
 	a.DB, err = sql.Open("postgres", dsn)
+	if err != nil {
+		panic(err)
+	}
+
+	err = a.DB.Ping()
 	if err != nil {
 		log.Printf("Error connecting to db: %v\n", err)
 	}
@@ -41,71 +46,74 @@ func (a *App) Initialize(user, password, dbname string) {
 
 func (a *App) initializeDB() {
 
-	// regex
-	re := regexp.MustCompile(`<li>(.*?)</li>`)
+	var err error
 
-	// create table
-	const nounTable = ` CREATE TABLE [IF NOT EXISTS] nouns (
-		id serial PRIMARY KEY,
-		word text
-	)`
+	words := []string{"noun", "adjective"}
 
-	const adjectiveTable = ` CREATE TABLE [IF NOT EXISTS] adjectives (
-		id serial PRIMARY KEY,
-		word text
-	)`
+	ctx, cancelfunc := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancelfunc()
 
-	a.DB.Exec(nounTable)
-	a.DB.Exec(adjectiveTable)
+	for _, word := range words {
 
-	// nouns
+		checkRow := fmt.Sprintf("SELECT COUNT (DISTINCT word) FROM %s WHERE word IS NOT NULL", word)
 
-	const nrow = `INSERT INTO nouns (
-	word
-	)
-	VALUES $1
-	)`
+		table := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s ( id serial PRIMARY KEY, word text )", word)
 
-	nresp, err := http.Get(nurl) // get contents of noun webpage
-	if err != nil {
-		log.Fatal(err)
+		insertRow := fmt.Sprintf("INSERT INTO %s ( word ) VALUES ($1)", word)
+
+		var fileLines []string
+
+		var rowCount int
+
+		file := "words/adjectives.text"
+
+		_, err = a.DB.ExecContext(ctx, table)
+		if err != nil {
+			panic(err)
+		}
+
+		if strings.Compare(word, "noun") == 0 {
+			file = "words/nouns.text"
+		}
+
+		numRows := a.DB.QueryRow(checkRow)
+		err = numRows.Scan(&rowCount)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// if table has more than 10000 values break has it already has all words
+		if rowCount > 10000 {
+			continue
+		}
+
+		readFile, err := os.Open(file)
+
+		if err != nil {
+			fmt.Println(err)
+		}
+		fileScanner := bufio.NewScanner(readFile)
+
+		fileScanner.Split(bufio.ScanLines)
+
+		for fileScanner.Scan() {
+			fileLines = append(fileLines, fileScanner.Text())
+		}
+
+		readFile.Close()
+
+		for _, line := range fileLines {
+			_, err = a.DB.ExecContext(ctx, insertRow, line)
+			if err != nil {
+				panic(err)
+			}
+
+		}
+
+		readFile.Close()
+
+		defer a.DB.Close()
 	}
-
-	defer nresp.Body.Close()
-
-	nhtml, err := ioutil.ReadAll(nresp.Body)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	nmatches := re.FindAllStringSubmatch(string(nhtml), -1) // select all words from regex and insert into table
-	for _, w := range nmatches {
-		a.DB.Exec(nrow, w[1])
-	}
-	defer a.DB.Close()
-
-	//adjectives
-	const arow = `INSERT INTO adjectives (
-		word
-	)
-	VALUES $1
-	)`
-
-	aresp, err := http.Get(aurl) // get contents of adjectives webpage
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer aresp.Body.Close()
-	ahtml, err := ioutil.ReadAll(aresp.Body)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	amatches := re.FindAllStringSubmatch(string(ahtml), -1) // select all words from regex and insert into table
-	for _, w := range amatches {
-		a.DB.Exec(arow, w[1])
-	}
-	defer a.DB.Close()
 }
 
 func (a *App) Run(addr string) {

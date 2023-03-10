@@ -1,0 +1,31 @@
+services:
+  api:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - DB_USERNAME=postgres
+      - DB_PASSWORD=changeme
+      - DB_NAME=words
+      - DB_HOST=db
+      - DB_PORT=5432
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_started
+    restart: always
+  db:
+        image: postgres:latest
+        restart: always
+        environment:
+          - POSTGRES_USER=postgres
+          - POSTGRES_PASSWORD=changeme
+          - POSTGRES_DB=words
+        ports:
+          - '5432:5432'
+        volumes:
+        - "database:/var/lib/postgresql/data"
+volumes:
+  database: {}
+
