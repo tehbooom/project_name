@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"os"
 
 	"github.com/tehbooom/project_name/app"
@@ -8,11 +9,21 @@ import (
 
 func main() {
 	a := app.App{}
-	a.Initialize(
-		os.Getenv("DB_HOST"),
-		os.Getenv("DB_PORT"),
-		os.Getenv("DB_USERNAME"),
-		os.Getenv("DB_PASSWORD"),
-		os.Getenv("DB_NAME"))
-	a.Run(":8080")
+
+	pathName := os.Getenv("PATH_NAME")
+	if pathName == "" {
+		pathName = "words.json"
+	}
+
+	portNumber := os.Getenv("LISTENING_PORT")
+	if portNumber == "" {
+		portNumber = "8080"
+	}
+
+	err := a.Initialize(pathName)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	a.Run(":" + portNumber)
 }
