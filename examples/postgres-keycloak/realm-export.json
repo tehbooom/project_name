@@ -1,0 +1,91 @@
+{
+  "realm": "project-name",
+  "enabled": true,
+  "displayName": "Project Name Example",
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "roles": {
+    "realm": [
+      {
+        "name": "contributor",
+        "description": "Can propose words"
+      },
+      {
+        "name": "moderator",
+        "description": "Can list, approve, and delete words"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "project-name",
+      "name": "Project Name Example Client",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": [
+        "http://localhost:*/*"
+      ],
+      "webOrigins": [
+        "http://localhost:*"
+      ],
+      "protocolMappers": [
+        {
+          "name": "project-name-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "project-name",
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "lightweight.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "contributor",
+      "enabled": true,
+      "firstName": "Example",
+      "lastName": "Contributor",
+      "email": "contributor@example.test",
+      "emailVerified": true,
+      "requiredActions": [],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "contributor",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "contributor"
+      ]
+    },
+    {
+      "username": "moderator",
+      "enabled": true,
+      "firstName": "Example",
+      "lastName": "Moderator",
+      "email": "moderator@example.test",
+      "emailVerified": true,
+      "requiredActions": [],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "moderator",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "moderator"
+      ]
+    }
+  ]
+}

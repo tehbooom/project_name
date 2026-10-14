@@ -1,0 +1,84 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  postgresql:
+    endpoint: postgres:5432
+    transport: tcp
+    username: otel_monitor
+    password: ${env:POSTGRES_OTEL_PASSWORD}
+    databases: [project_name]
+    collection_interval: 10s
+    tls:
+      insecure: true
+  filelog/postgresql:
+    include: [/var/log/postgresql/server.json]
+    start_at: beginning
+    include_file_name: false
+    resource:
+      service.name: postgresql
+      service.namespace: examples
+      db.system.name: postgresql
+    operators:
+      - type: json_parser
+        timestamp:
+          parse_from: attributes.timestamp
+          layout_type: strptime
+          layout: "%Y-%m-%d %H:%M:%S.%L %Z"
+        severity:
+          parse_from: attributes.error_severity
+      - type: move
+        from: attributes.message
+        to: body
+
+connectors:
+  elasticapm:
+
+processors:
+  elastictrace:
+
+exporters:
+  elasticsearch:
+    endpoint: http://elasticsearch:9200
+    user: elastic
+    password: elastic
+    mapping:
+      mode: otel
+    logs_dynamic_index:
+      enabled: true
+    metrics_dynamic_index:
+      enabled: true
+    traces_dynamic_index:
+      enabled: true
+    flush:
+      interval: 1s
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [elastictrace]
+      exporters: [elasticapm, elasticsearch]
+
+    metrics:
+      receivers: [otlp, postgresql]
+      processors: []
+      exporters: [elasticsearch]
+
+    metrics/aggregated:
+      receivers: [elasticapm]
+      processors: []
+      exporters: [elasticsearch]
+
+    logs:
+      receivers: [otlp]
+      processors: []
+      exporters: [elasticapm, elasticsearch]
+
+    logs/postgresql:
+      receivers: [filelog/postgresql]
+      processors: []
+      exporters: [elasticsearch]

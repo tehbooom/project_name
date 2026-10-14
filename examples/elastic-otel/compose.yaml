@@ -1,0 +1,240 @@
+name: project-name-elastic-otel
+
+configs:
+  edot-collector-config:
+    file: ./edot-collector.yml
+  postgres-monitoring-config:
+    file: ./postgres-monitoring.sql
+
+services:
+  app:
+    build:
+      context: ../..
+      args:
+        GOPROXY: https://goproxy.io,direct
+    init: true
+    read_only: true
+    environment:
+      LISTENING_PORT: "8080"
+      WORDS_DIR: /app/words
+      UNSAFE_MODE_ENABLED: "true"
+      WORD_STORE_DRIVER: postgres
+      WORD_STORE_POSTGRES_DSN: postgres://project_name:project_name@postgres:5432/project_name?sslmode=disable
+      WORD_STORE_AUTO_MIGRATE: "true"
+      WORD_STORE_SEED: "true"
+      AUTH_DRIVERS: static-token
+      STATIC_ADMIN_TOKEN_FILE: /tmp/project-name-admin-token
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: otlp
+      OTEL_LOGS_EXPORTER: otlp
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_SERVICE_NAME: project-name
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment.name=local,service.namespace=examples,service.version=dev
+      OTEL_METRIC_EXPORT_INTERVAL: "5000"
+      OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE: delta
+      OTEL_BSP_SCHEDULE_DELAY: "1000"
+      BROWSER_OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      BROWSER_OTEL_SAMPLE_RATIO: "1"
+      BROWSER_OTEL_SERVICE_NAME: project-name-web
+      BROWSER_OTEL_SERVICE_NAMESPACE: examples
+      BROWSER_OTEL_SERVICE_VERSION: dev
+      BROWSER_OTEL_DEPLOYMENT_ENVIRONMENT: local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      otel-collector:
+        condition: service_healthy
+    tmpfs:
+      - /tmp:mode=700,uid=65532,gid=65532
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s
+
+  frontend:
+    build:
+      context: ../..
+      dockerfile: frontend/Dockerfile
+    read_only: true
+    ports:
+      - "8080:8080"
+    depends_on:
+      app:
+        condition: service_healthy
+    tmpfs:
+      - /tmp:mode=700,uid=101,gid=101
+    security_opt:
+      - no-new-privileges:true
+
+  postgres:
+    build:
+      context: ../..
+      dockerfile: examples/elastic-otel/postgres.Dockerfile
+    command:
+      - postgres
+      - -c
+      - logging_collector=on
+      - -c
+      - log_destination=jsonlog
+      - -c
+      - log_directory=/var/log/postgresql
+      - -c
+      - log_filename=server
+      - -c
+      - log_file_mode=0640
+      - -c
+      - log_rotation_age=0
+      - -c
+      - log_rotation_size=0
+      - -c
+      - log_connections=on
+      - -c
+      - log_disconnections=on
+      - -c
+      - log_lock_waits=on
+      - -c
+      - log_min_duration_statement=500
+      - -c
+      - log_parameter_max_length=0
+      - -c
+      - log_parameter_max_length_on_error=0
+    environment:
+      POSTGRES_DB: project_name
+      POSTGRES_USER: project_name
+      POSTGRES_PASSWORD: project_name
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - postgres-logs:/var/log/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U project_name -d project_name"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    security_opt:
+      - no-new-privileges:true
+
+  postgres-settings:
+    image: postgres:17-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGDATABASE: project_name
+      PGUSER: project_name
+      PGPASSWORD: project_name
+    configs:
+      - source: postgres-monitoring-config
+        target: /postgres-monitoring.sql
+    command: ["psql", "--set=ON_ERROR_STOP=1", "--file=/postgres-monitoring.sql"]
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+
+  elasticsearch:
+    image: elasticsearch:${STACK_VERSION:-9.5.5}
+    ports:
+      - "127.0.0.1:9200:9200"
+    environment:
+      node.name: elasticsearch
+      cluster.name: project-name-local
+      discovery.type: single-node
+      ELASTIC_PASSWORD: elastic
+      bootstrap.memory_lock: "true"
+      xpack.security.enabled: "true"
+      xpack.security.http.ssl.enabled: "false"
+      xpack.security.transport.ssl.enabled: "false"
+      xpack.license.self_generated.type: trial
+      ES_JAVA_OPTS: -Xms2g -Xmx2g
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    mem_limit: 3g
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl --max-time 1 -s http://localhost:9200 | grep -q 'missing authentication credentials'",
+        ]
+      start_period: 10s
+      interval: 2s
+      timeout: 10s
+      retries: 120
+
+  elasticsearch-settings:
+    image: elasticsearch:${STACK_VERSION:-9.5.5}
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    restart: "no"
+    command: >
+      bash -c '
+      until curl --max-time 1 -s -u "elastic:elastic"
+      -X POST http://elasticsearch:9200/_security/user/kibana_system/_password
+      -d "{\"password\":\"elastic\"}"
+      -H "Content-Type: application/json" | grep -q "^{}"; do sleep 2; done
+      '
+
+  kibana:
+    image: kibana:${STACK_VERSION:-9.5.5}
+    depends_on:
+      elasticsearch-settings:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:5601:5601"
+    environment:
+      SERVER_NAME: kibana
+      SERVER_PUBLICBASEURL: http://127.0.0.1:5601
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+      ELASTICSEARCH_USERNAME: kibana_system
+      ELASTICSEARCH_PASSWORD: elastic
+      MONITORING_UI_CONTAINER_ELASTICSEARCH_ENABLED: "true"
+      XPACK_SECURITY_ENCRYPTIONKEY: fhjskloppd678ehkdfdlliverpoolfcr
+      XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY: fhjskloppd678ehkdfdlliverpoolfcr
+    mem_limit: 2g
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl --max-time 1 -s http://localhost:5601/api/status | grep -q 'available'",
+        ]
+      interval: 2s
+      timeout: 10s
+      retries: 150
+
+  otel-collector:
+    image: elastic/elastic-agent:${STACK_VERSION:-9.5.5}
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      postgres-settings:
+        condition: service_completed_successfully
+    command: ["--config", "/etc/otelcol-config.yml"]
+    environment:
+      ELASTIC_AGENT_OTEL: "true"
+      STORAGE_DIR: /usr/share/elastic-agent
+      POSTGRES_OTEL_PASSWORD: otel_monitor
+    group_add:
+      - "70"
+    configs:
+      - source: edot-collector-config
+        target: /etc/otelcol-config.yml
+    volumes:
+      - postgres-logs:/var/log/postgresql:ro
+    ports:
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo -n > /dev/tcp/127.0.0.1/4317'"]
+      interval: 2s
+      timeout: 5s
+      retries: 120
+
+volumes:
+  postgres-data:
+  postgres-logs:
+  elasticsearch-data:

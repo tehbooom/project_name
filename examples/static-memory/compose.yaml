@@ -1,0 +1,37 @@
+services:
+  app:
+    build:
+      context: ../..
+    init: true
+    read_only: true
+    environment:
+      LISTENING_PORT: "8080"
+      WORDS_DIR: /app/words
+      UNSAFE_MODE_ENABLED: "true"
+      WORD_STORE_DRIVER: memory
+      AUTH_DRIVERS: static-token
+      STATIC_ADMIN_TOKEN_FILE: /tmp/project-name-admin-token
+      OTEL_TRACES_EXPORTER: none
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: console
+      OTEL_SERVICE_NAME: project-name
+    tmpfs:
+      - /tmp:mode=700,uid=65532,gid=65532
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s
+
+  frontend:
+    build:
+      context: ../..
+      dockerfile: frontend/Dockerfile
+    read_only: true
+    ports:
+      - "8080:8080"
+    depends_on:
+      app:
+        condition: service_healthy
+    tmpfs:
+      - /tmp:mode=700,uid=101,gid=101
+    security_opt:
+      - no-new-privileges:true

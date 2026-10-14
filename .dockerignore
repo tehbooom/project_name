@@ -1,0 +1,13 @@
+.git
+.github
+.cursor
+.env
+.env.*
+.DS_Store
+data
+tmp
+**/node_modules
+frontend/dist
+*.log
+project-name
+project_name

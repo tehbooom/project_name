@@ -1,0 +1,8 @@
+.DS_Store
+.env
+.env.*
+coverage.out
+node_modules/
+frontend/dist/
+data/
+tmp/
